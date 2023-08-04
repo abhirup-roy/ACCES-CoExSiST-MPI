@@ -8,7 +8,7 @@
 
 # CoExSiST & ACCES
 ```diff
-- This is a fork of the CoExSiST - ACCES library for me to put all my janky additions.#
+- This is a fork of the CoExSiST - ACCES library for me to put all my janky additions.
 ```
 ### Data-Driven Evolutionary Calibration & Optimisation of Simulations
 
