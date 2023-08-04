@@ -6,21 +6,20 @@
 # Date   : 28.01.2022
 
 
-import  re
-import  os
-import  pickle
-import  pathlib
-import  textwrap
-
-import  numpy       as      np
+import re
+import os
+import pickle
+import pathlib
+import textwrap
+import ctypes
+import numpy as np
 
 # `liggghts` is an optional dependency for LiggghtsSimulation
-from    liggghts    import  liggghts        # lgtm [py/import-own-module]
-from    pyevtk.hl   import  pointsToVTK
+from liggghts import liggghts  # lgtm [py/import-own-module]
+from pyevtk.hl import pointsToVTK
 
 # Local imports
-from    .base       import  Simulation, Parameters
-
+from .base import Simulation, Parameters
 
 
 class LiggghtsSimulation(Simulation):
@@ -58,13 +57,13 @@ class LiggghtsSimulation(Simulation):
     '''
 
     def __init__(
-        self,
-        sim_name,
-        parameters = Parameters(),
-        set_parameters = True,
-        timestep = None,
-        save_vtk = None,
-        verbose = False,
+            self,
+            sim_name,
+            parameters=Parameters(),
+            set_parameters=True,
+            timestep=None,
+            save_vtk=None,
+            verbose=False,
     ):
         '''`Simulation` class constructor.
 
@@ -120,7 +119,7 @@ class LiggghtsSimulation(Simulation):
         if self._verbose:
             self.simulation = liggghts()
         else:
-            self.simulation = liggghts(cmdargs = ["-screen", "/dev/null"])
+            self.simulation = liggghts(cmdargs=["-screen", "/dev/null"])
 
         self.sim_name = str(sim_name)
         self.properties = []
@@ -236,15 +235,14 @@ class LiggghtsSimulation(Simulation):
             else:
                 # Create folder recursively if folder is nested
                 pathlib.Path(self._save_vtk).mkdir(
-                    parents = True,
-                    exist_ok = True,
+                    parents=True,
+                    exist_ok=True,
                 )
 
             self.write_vtk()
 
         else:
             self._save_vtk = None
-
 
     def create_properties(self, sim_name):
         with open(sim_name) as f:
@@ -260,9 +258,9 @@ class LiggghtsSimulation(Simulation):
 
             # Concatenate next lines if the last character is "&"
             while len(line) > 0 and line[-1] == "&":
-                line = line[:-1]                # Remove the last character, &
-                i += 1                          # Increment index
-                line += " " + sim_input[i]      # Concatenate next line
+                line = line[:-1]  # Remove the last character, &
+                i += 1  # Increment index
+                line += " " + sim_input[i]  # Concatenate next line
 
             # Remove comments from the end of the line
             line_nc = line.split("#")[0]
@@ -276,18 +274,15 @@ class LiggghtsSimulation(Simulation):
 
             i += 1
 
-
     @property
     def parameters(self):
         return self._parameters
-
 
     @property
     def step_size(self):
         # save a step_size property of the class, so we can define the
         # step_size
         return self._step_size
-
 
     @step_size.setter
     def step_size(self, new_step_size):
@@ -298,21 +293,17 @@ class LiggghtsSimulation(Simulation):
         else:
             raise ValueError("Step size must be between 0 and 1 !")
 
-
     @property
     def verbose(self):
         self._verbose
-
 
     @verbose.setter
     def verbose(self, verbose):
         self._verbose = bool(verbose)
 
-
     @property
     def save_vtk(self):
         return self._save_vtk
-
 
     @save_vtk.setter
     def save_vtk(self, save_vtk):
@@ -321,8 +312,7 @@ class LiggghtsSimulation(Simulation):
         else:
             self._save_vtk = None
 
-
-    def save(self, filename = None):
+    def save(self, filename=None):
         '''Save a simulation's full state, along with data not included in the
         standard LIGGGHTS restart file and the internal `parameters`.
 
@@ -369,9 +359,8 @@ class LiggghtsSimulation(Simulation):
         with open(f"{filename}_parameters.sim", "wb") as f:
             pickle.dump(self.parameters, f)
 
-
     @staticmethod
-    def load(filename, verbose = False):
+    def load(filename, verbose=False):
         # load a new simulation based on the position data from filename and
         # the system based on self.filename
         #
@@ -388,12 +377,10 @@ class LiggghtsSimulation(Simulation):
         with open(f"{filename}_parameters.sim", "rb") as f:
             parameters = pickle.load(f)
 
-        return LiggghtsSimulation(filename, parameters, verbose = verbose)
-
+        return LiggghtsSimulation(filename, parameters, verbose=verbose)
 
     def num_atoms(self):
         return self.simulation.get_natoms()
-
 
     def radii(self):
         # Get particle radii
@@ -410,11 +397,9 @@ class LiggghtsSimulation(Simulation):
 
         return radii
 
-
     def set_density(self, particle_id, density):
         cmd = (f"set atom {particle_id + 1} density {density}")
         self.execute_command(cmd)
-
 
     def positions(self):
         # Get particle positions
@@ -433,7 +418,6 @@ class LiggghtsSimulation(Simulation):
 
         return pos
 
-
     def velocities(self):
         # Get particle velocities
         nlocal = self.simulation.extract_atom("nlocal", 0)[0]
@@ -451,7 +435,6 @@ class LiggghtsSimulation(Simulation):
 
         return vel
 
-    
     def forces(self):
         # Get particle forces
         nlocal = self.simulation.extract_atom("nlocal", 0)[0]
@@ -468,8 +451,7 @@ class LiggghtsSimulation(Simulation):
             forc[ids[i] - 1, 2] = forc_lig[i][2]
 
         return forc
-    
-    
+
     def mesh_forces(self, fix_id):
         if not self.check_mesh_stress_output:
             self.check_mesh_stress_output = True
@@ -492,32 +474,43 @@ class LiggghtsSimulation(Simulation):
         self.simulation.command(f'variable fz_{fix_id} equal f_{fix_id}[3]')
 
         mesh_forc = [
-        self.simulation.extract_variable(f"fx_{fix_id}", "", 0),
-        self.simulation.extract_variable(f"fy_{fix_id}", "", 0),
-        self.simulation.extract_variable(f"fz_{fix_id}", "", 0),
+            self.simulation.extract_variable(f"fx_{fix_id}", "", 0),
+            self.simulation.extract_variable(f"fy_{fix_id}", "", 0),
+            self.simulation.extract_variable(f"fz_{fix_id}", "", 0),
         ]
         return mesh_forc
-    
-    
+
+    def compute_normal_forces(self, compute_id):
+
+        normal_forces_c_double = self.simulation.extract_compute(compute_id, 2, 2)
+        number_of_contacts = ctypes.sizeof(normal_forces_c_double)
+
+        normal_forces = np.full((number_of_contacts, 3), np.nan)
+        for i in range(number_of_contacts):
+            print(i)
+            normal_forces[i, 0] = normal_forces_c_double[i][0]
+            normal_forces[i, 1] = normal_forces_c_double[i][1]
+            normal_forces[i, 2] = normal_forces_c_double[i][2]
+
+        return normal_forces
+
     def set_position(
-        self,
-        particle_id,    # single number of particle's ID
-        position        # array or list of particle positions 1x3
+            self,
+            particle_id,  # single number of particle's ID
+            position  # array or list of particle positions 1x3
     ):
         cmd = (f"set atom {particle_id + 1} x {position[0]} y {position[1]} "
                f"z {position[2]}")
         self.execute_command(cmd)
 
-
     def set_velocity(
-        self,
-        particle_id,    # single number of particle's ID
-        velocity        # array or list of particle velocitys 1x3
+            self,
+            particle_id,  # single number of particle's ID
+            velocity  # array or list of particle velocitys 1x3
     ):
         cmd = (f"set atom {particle_id + 1} vx {velocity[0]} vy {velocity[1]} "
                f"vz {velocity[2]}")
         self.execute_command(cmd)
-
 
     def variable(self, var_name):
         try:
@@ -529,7 +522,6 @@ class LiggghtsSimulation(Simulation):
 
         return varb
 
-
     def step(self, num_steps):
         # run simulation for `num_steps` timesteps
         if self.verbose:
@@ -539,7 +531,6 @@ class LiggghtsSimulation(Simulation):
 
         if self.save_vtk:
             self.write_vtk()
-
 
     def step_to(self, timestamp):
         # run simulation up to timestep = `timestamp`
@@ -556,7 +547,6 @@ class LiggghtsSimulation(Simulation):
 
         if self.save_vtk:
             self.write_vtk()
-
 
     def step_time(self, time):
         # find timestep which can run exectly to time
@@ -582,7 +572,6 @@ class LiggghtsSimulation(Simulation):
 
         if self.save_vtk:
             self.write_vtk()
-
 
     def step_to_time(self, time):
         # run simulation up to sim time = `time`
@@ -621,20 +610,16 @@ class LiggghtsSimulation(Simulation):
         if self.save_vtk:
             self.write_vtk()
 
-
     def reset_time(self):
         # reset the current timestep to 0
         self.execute_command("reset_timestep 0")
-
 
     def timestep(self):
         # return the current timestep
         return self.simulation.extract_global("ntimestep", 0)
 
-
     def time(self):
         return self.simulation.extract_global("atime", 1)
-
 
     def execute_command(self, cmd):
         cmds = cmd.split("\n")
@@ -650,8 +635,7 @@ class LiggghtsSimulation(Simulation):
                     self.finder_kw_ignore.search(cmd_nc):
                 self.properties.append(cmd)
 
-
-    def copy(self, filename = None):
+    def copy(self, filename=None):
         """Create a copy the ligghts instance, including particle positions,
         velocities, properties and the simulated system.
         """
@@ -663,8 +647,8 @@ class LiggghtsSimulation(Simulation):
 
         new_sim = Simulation(
             filename,
-            parameters = self.parameters.copy(),
-            verbose = self.verbose,
+            parameters=self.parameters.copy(),
+            verbose=self.verbose,
         )
 
         os.remove(f"{filename}_restart.sim")
@@ -672,8 +656,7 @@ class LiggghtsSimulation(Simulation):
 
         return new_sim
 
-
-    def write_vtk(self, dirname = None):
+    def write_vtk(self, dirname=None):
         if dirname is None and self.save_vtk is None:
             raise ValueError(textwrap.fill((
                 "The input `dirname` was not set, in which case the value of "
@@ -709,24 +692,23 @@ class LiggghtsSimulation(Simulation):
         else:
             vtk_index = 0
 
-        positions = np.asarray(self.positions(), order = "F")
-        velocities = np.asarray(self.velocities(), order = "F")
+        positions = np.asarray(self.positions(), order="F")
+        velocities = np.asarray(self.velocities(), order="F")
 
         pointsToVTK(
             f"{dirname}/locations_{vtk_index + 1}",
             positions[:, 0],
             positions[:, 1],
             positions[:, 2],
-            data = dict(
-                time = np.full(len(positions), self.time()),
-                radius = self.radii(),
-                velocity = np.linalg.norm(velocities, axis = 1),
-                velocity_x = velocities[:, 0],
-                velocity_y = velocities[:, 1],
-                velocity_z = velocities[:, 2],
+            data=dict(
+                time=np.full(len(positions), self.time()),
+                radius=self.radii(),
+                velocity=np.linalg.norm(velocities, axis=1),
+                velocity_x=velocities[:, 0],
+                velocity_y=velocities[:, 1],
+                velocity_z=velocities[:, 2],
             )
         )
-
 
     def __setitem__(self, key, value):
         # Custom key-value setter to change a parameter in the class *and*
@@ -782,12 +764,10 @@ class LiggghtsSimulation(Simulation):
         # Set inner class parameter value
         self.parameters.at[key, "value"] = value
 
-
         docstr = (
         )
 
         return docstr
-
 
     def __repr__(self):
         # Shown when writing the class on a REPL
@@ -801,21 +781,18 @@ class LiggghtsSimulation(Simulation):
         )
 
 
-
-
 class AutoTimestep():
     def __init__(
-        self,
-        youngs_modulus,
-        particle_diameter,
-        poissons_ratio,
-        particle_density,
+            self,
+            youngs_modulus,
+            particle_diameter,
+            poissons_ratio,
+            particle_density,
     ):
         self.youngs_modulus = float(youngs_modulus)
         self.particle_diameter = float(particle_diameter)
         self.poissons_ratio = float(poissons_ratio)
         self.particle_density = float(particle_density)
-
 
     def timestep(self):
         # Aliases
