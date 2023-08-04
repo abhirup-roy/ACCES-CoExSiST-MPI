@@ -487,7 +487,6 @@ class LiggghtsSimulation(Simulation):
 
         normal_forces = np.full((number_of_contacts, 3), np.nan)
         for i in range(number_of_contacts):
-            print(i)
             normal_forces[i, 0] = normal_forces_c_double[i][0]
             normal_forces[i, 1] = normal_forces_c_double[i][1]
             normal_forces[i, 2] = normal_forces_c_double[i][2]
