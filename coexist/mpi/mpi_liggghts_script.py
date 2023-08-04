@@ -1,3 +1,7 @@
+from ctypes import c_double, c_int
+from mpi4py import MPI
+import zmq
+import sys
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 # File   : liggghts.py
@@ -19,13 +23,14 @@ from    liggghts    import  liggghts        # lgtm [py/import-own-module]
 from    pyevtk.hl   import  pointsToVTK
 
 # Local imports
-from    .base       import  Simulation, Parameters
+from    coexist.base       import  Simulation, Parameters
 
 
 
-class LiggghtsSimulation(Simulation):
+class LiggghtsMPISimulation(Simulation):
     '''Pythonic interface to LIGGGHTS, interfacing with a given simulation
     script, optionally returning NumPy arrays to relevant particle properties.
+    THIS INTERFACE WAS REWRITTEN TO USE MPI4PY.
 
     You need to have the ``liggghts`` Python library available; you can see the
     `https://github.com/uob-positron-imaging-centre/PICI-LIGGGHTS` repository
@@ -114,6 +119,9 @@ class LiggghtsSimulation(Simulation):
                 `Parameters` class. Received {type(parameters)}.'''
             ))
 
+        self.comm = MPI.COMM_WORLD
+        self.rank = self.comm.Get_rank()
+        self.num_ranks = self.comm.Get_size()
         # Create class attributes
         self._verbose = bool(verbose)
 
@@ -396,18 +404,41 @@ class LiggghtsSimulation(Simulation):
 
 
     def radii(self):
-        # Get particle radii
+        # extract radii from all particles
         nlocal = self.simulation.extract_atom("nlocal", 0)[0]
         id_lig = self.simulation.extract_atom("id", 0)
-
-        ids = np.array([id_lig[i] for i in range(nlocal)])
-        radii = np.full(ids.max(), np.nan)
-
         radii_lig = self.simulation.extract_atom("radius", 2)
 
-        for i in range(len(ids)):
-            radii[ids[i] - 1] = radii_lig[i]
+        # the extracted values are actually just pointers.
+        # copy data into a numpy array
+        id_local = np.zeros(nlocal, dtype = np.int32)
+        radii_local = np.zeros(nlocal, dtype = np.float64)
+        for i in range(nlocal):
+            id_local[i] = id_lig[i]
+            radii_local[i] = radii_lig[i]
 
+        # next step is to gather all data into a single array at rank 0
+        all_radii = None
+        all_ids = None
+
+        # Collect local array sizes using the high-level mpi4py gather
+        sendcounts = np.array(self.comm.gather(len(radii_local), root=0))
+        if self.rank == 0:
+            all_radii = np.full(sum(sendcounts), np.nan, dtype = np.float64)
+            all_ids = np.full(sum(sendcounts), np.nan, dtype = np.int32)
+
+        # gather all radii from all ranks to 0
+        self.comm.Gatherv(sendbuf=radii_local, recvbuf=(
+            all_radii, sendcounts), root = 0)
+        self.comm.Gatherv(sendbuf=id_local, recvbuf=(
+            all_ids, sendcounts), root = 0)
+
+        # sort the arrays
+        radii = None
+        if self.rank == 0:
+            radii = np.full(all_ids.max(), np.nan)
+            for i in range(len(all_ids)):
+                radii[all_ids[i] - 1] = all_radii[i]
         return radii
 
 
@@ -417,56 +448,139 @@ class LiggghtsSimulation(Simulation):
 
 
     def positions(self):
-        # Get particle positions
+        # Get particle positions in each local process
         nlocal = self.simulation.extract_atom("nlocal", 0)[0]
         id_lig = self.simulation.extract_atom("id", 0)
 
         ids = np.array([id_lig[i] for i in range(nlocal)])
-        pos = np.full((ids.max(), 3), np.nan)
+        ids = np.asarray(ids, dtype = np.int64)
+        #print("Ids of rank", self.rank, "are", ids)
+        pos = np.full(nlocal * 3, np.nan)
 
         pos_lig = self.simulation.extract_atom("x", 3)
+        #print("Rank", self.rank, "has", nlocal, "particles.")
+        for i in range(nlocal):
+            pos[i * 3] = pos_lig[i][0]
+            pos[i * 3 + 1] = pos_lig[i][1]
+            pos[i * 3 + 2] = pos_lig[i][2]
 
-        for i in range(len(ids)):
-            pos[ids[i] - 1, 0] = pos_lig[i][0]
-            pos[ids[i] - 1, 1] = pos_lig[i][1]
-            pos[ids[i] - 1, 2] = pos_lig[i][2]
+        pos = pos.flatten()
+        all_pos = None
+        all_ids = None
+        # first let rank 0 know how many particles each rank has
+        #print("Here rank", self.rank, "has", pos.size, "particles.")
+        sendcounts = np.array(self.comm.gather(pos.size, root=0))
+        sendcounts = self.comm.bcast(sendcounts, root = 0)
+        if self.rank == 0:
+            all_pos = np.full(sum(sendcounts), np.nan, dtype = np.float64)
+            all_ids = np.full(sum(sendcounts) // 3, np.nan, dtype = np.int64)
+        #print("Here rank", self.rank, "has", sendcounts, "particles.")
+        # then collect all positions to rank 0
+        self.comm.Gatherv(sendbuf=pos, recvbuf=(
+            all_pos, sendcounts), root = 0)
+        self.comm.Gatherv(sendbuf=ids, recvbuf=(
+            all_ids, sendcounts // 3), root = 0)
+
+
+
+        pos = None
+
+        if self.rank == 0:
+            pos = np.full((all_ids.max(), 3), np.nan)
+            for i in range(len(all_pos)):
+                pos[all_ids[i // 3] - 1, i % 3] = all_pos[i]
+            pos.reshape(-1, 3)
+
+
 
         return pos
 
 
     def velocities(self):
-        # Get particle velocities
+        # Get particle vel in each local process
         nlocal = self.simulation.extract_atom("nlocal", 0)[0]
         id_lig = self.simulation.extract_atom("id", 0)
 
         ids = np.array([id_lig[i] for i in range(nlocal)])
-        vel = np.full((ids.max(), 3), np.nan)
+        ids = np.asarray(ids, dtype = np.int64)
+        #print("Ids of rank", self.rank, "are", ids)
+        vel = np.full(nlocal * 3, np.nan)
 
         vel_lig = self.simulation.extract_atom("v", 3)
+        #print("Rank", self.rank, "has", nlocal, "particles.")
+        for i in range(nlocal):
+            vel[i * 3] = vel_lig[i][0]
+            vel[i * 3 + 1] = vel_lig[i][1]
+            vel[i * 3 + 2] = vel_lig[i][2]
 
-        for i in range(len(ids)):
-            vel[ids[i] - 1, 0] = vel_lig[i][0]
-            vel[ids[i] - 1, 1] = vel_lig[i][1]
-            vel[ids[i] - 1, 2] = vel_lig[i][2]
+        vel = vel.flatten()
+        all_vel = None
+        all_ids = None
+        # first let rank 0 know how many particles each rank has
+        #print("Here rank", self.rank, "has", vel.size, "particles.")
+        sendcounts = np.array(self.comm.gather(vel.size, root=0))
+        sendcounts = self.comm.bcast(sendcounts, root = 0)
+        if self.rank == 0:
+            all_vel = np.full(sum(sendcounts), np.nan, dtype = np.float64)
+            all_ids = np.full(sum(sendcounts) // 3, np.nan, dtype = np.int64)
+        #print("Here rank", self.rank, "has", sendcounts, "particles.")
+        # then collect all vel to rank 0
+        self.comm.Gatherv(sendbuf=vel, recvbuf=(
+            all_vel, sendcounts), root = 0)
+        self.comm.Gatherv(sendbuf=ids, recvbuf=(
+            all_ids, sendcounts // 3), root = 0)
 
+        vel = None
+
+        if self.rank == 0:
+            vel = np.full((all_ids.max(), 3), np.nan)
+            for i in range(len(all_vel)):
+                vel[all_ids[i // 3] - 1, i % 3] = all_vel[i]
+            vel.reshape(-1, 3)
         return vel
-
+    
     
     def forces(self):
-        # Get particle forces
+        # Get particle forces in each local process
         nlocal = self.simulation.extract_atom("nlocal", 0)[0]
         id_lig = self.simulation.extract_atom("id", 0)
 
         ids = np.array([id_lig[i] for i in range(nlocal)])
-        forc = np.full((ids.max(), 3), np.nan)
+        ids = np.asarray(ids, dtype = np.int64)
+        #print("Ids of rank", self.rank, "are", ids)
+        forc = np.full(nlocal * 3, np.nan)
 
         forc_lig = self.simulation.extract_atom("f", 3)
+        #print("Rank", self.rank, "has", nlocal, "particles.")
+        for i in range(nlocal):
+            forc[i * 3] = forc_lig[i][0]
+            forc[i * 3 + 1] = forc_lig[i][1]
+            forc[i * 3 + 2] = forc_lig[i][2]
 
-        for i in range(len(ids)):
-            forc[ids[i] - 1, 0] = forc_lig[i][0]
-            forc[ids[i] - 1, 1] = forc_lig[i][1]
-            forc[ids[i] - 1, 2] = forc_lig[i][2]
+        forc = forc.flatten()
+        all_forc = None
+        all_ids = None
+        # first let rank 0 know how many particles each rank has
+        #print("Here rank", self.rank, "has", vel.size, "particles.")
+        sendcounts = np.array(self.comm.gather(forc.size, root=0))
+        sendcounts = self.comm.bcast(sendcounts, root = 0)
+        if self.rank == 0:
+            all_forc = np.full(sum(sendcounts), np.nan, dtype = np.float64)
+            all_ids = np.full(sum(sendcounts) // 3, np.nan, dtype = np.int64)
+        #print("Here rank", self.rank, "has", sendcounts, "particles.")
+        # then collect all forc to rank 0
+        self.comm.Gatherv(sendbuf=forc, recvbuf=(
+            all_forc, sendcounts), root = 0)
+        self.comm.Gatherv(sendbuf=ids, recvbuf=(
+            all_ids, sendcounts // 3), root = 0)
 
+        forc = None
+
+        if self.rank == 0:
+            forc = np.full((all_ids.max(), 3), np.nan)
+            for i in range(len(all_forc)):
+                forc[all_ids[i // 3] - 1, i % 3] = all_forc[i]
+            forc.reshape(-1, 3)
         return forc
     
     
@@ -486,7 +600,7 @@ class LiggghtsSimulation(Simulation):
                     "Please add `mesh/surface/stress` to the fix command."
                 )))
 
-        # Get forces on meash with ID: fix_id
+        # Get forces on mesh with ID: fix_id
         self.simulation.command(f'variable fx_{fix_id} equal f_{fix_id}[1]')
         self.simulation.command(f'variable fy_{fix_id} equal f_{fix_id}[2]')
         self.simulation.command(f'variable fz_{fix_id} equal f_{fix_id}[3]')
@@ -498,7 +612,7 @@ class LiggghtsSimulation(Simulation):
         ]
         return mesh_forc
     
-    
+
     def set_position(
         self,
         particle_id,    # single number of particle's ID
@@ -800,6 +914,8 @@ class LiggghtsSimulation(Simulation):
             f"  parameters:\n{self.parameters}"
         )
 
+    def __del__(self):
+        self.simulation.close()
 
 
 
@@ -829,3 +945,81 @@ class AutoTimestep():
         )
 
         return timestep
+
+
+
+if __name__ == "__main__":
+    input_file = None
+    verbose = None
+    # only rank 0 needs a zmq socket for communication
+    # get also filename from command line
+    if MPI.COMM_WORLD.rank == 0:
+        context = zmq.Context()
+        socket = context.socket(zmq.PAIR)
+        argument_lst = sys.argv
+        port_selected = argument_lst[argument_lst.index("--zmqport") + 1]
+        socket.connect("tcp://localhost:" + port_selected)
+        input_file = argument_lst[argument_lst.index("--file") + 1]
+        verbose = argument_lst[argument_lst.index("--verbose") + 1] == "True"
+    # every rank needs a liggghts simulation
+    input_file = MPI.COMM_WORLD.bcast(input_file, root=0)
+    verbose = MPI.COMM_WORLD.bcast(verbose, root=0)
+    sim = LiggghtsMPISimulation(input_file, verbose=verbose)
+
+    # after the initializatial run the rank 0 sends a signal to zmq to tell it its done
+    if MPI.COMM_WORLD.rank == 0:
+        socket.send(pickle.dumps("ready"))
+
+    # run indefinitely until a "close" command is received
+    while True:
+        # print("hi")
+        # Rank zero waits to receive a command
+        if MPI.COMM_WORLD.rank == 0:
+            input_dict = pickle.loads(socket.recv())
+        else:
+            # All other ranks receive a None
+            input_dict = None
+
+        # Rank zero broadcasts the command to all ranks
+        input_dict = MPI.COMM_WORLD.bcast(input_dict, root=0)
+
+        # Close if the command is "close"
+        if input_dict["c"] == "close":
+            if MPI.COMM_WORLD.rank == 0:
+                socket.send(pickle.dumps("closed"))
+                socket.close()
+                context.term()
+            sim.__del__()
+
+            break
+        import builtins
+
+        def print(*args, **kwargs):
+            if MPI.COMM_WORLD.rank == 0:
+                builtins.print(*args, **kwargs)
+        # Run the command in the python class
+        func = getattr(sim, input_dict["c"])
+        if  ((input_dict["d"][0] != ()) or (input_dict["d"][1] != {})):
+            args = input_dict["d"][0]
+            kwargs = input_dict["d"][1]
+            if callable(func):
+                output = func(*args, **kwargs)
+            else:
+                # is a property
+                setattr(sim, input_dict["c"], input_dict["d"][0][0])
+                output = None
+        else:
+            # checking if func is a getter
+            if callable(func):
+                output = func()
+            else:
+                # is a property
+                output = func
+            # print(output)
+        # Rank zero sends the output back to the client
+        if MPI.COMM_WORLD.rank == 0:
+            # with open('process.txt', 'a') as file:
+            #     print('Output:', output, file=file)
+            #print("Sending :", output)
+            socket.send(pickle.dumps(output))
+    MPI.Finalize()
