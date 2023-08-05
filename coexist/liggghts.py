@@ -63,6 +63,7 @@ class LiggghtsSimulation(Simulation):
             set_parameters=True,
             timestep=None,
             save_vtk=None,
+            compute_output=None,
             verbose=False,
     ):
         '''`Simulation` class constructor.
@@ -101,6 +102,12 @@ class LiggghtsSimulation(Simulation):
             files for each timestep. This parameter should be the *directory
             name* for saving files in the format
             `{save_vtk}/locations_{timestep_index}.vtk`.
+
+        compute_output : str, optional
+            Sets up a command to be able to extract compute varaibles from a
+            group of atoms. To use, simply set compute_output equal to the
+            group_id of the group of atoms you want to extract data from. I.e.
+            'compute_output=spheres' would extract data from the spheres group.
 
         verbose : bool, default `True`
             Show LIGGGHTS output while simulation is running.
@@ -243,6 +250,11 @@ class LiggghtsSimulation(Simulation):
 
         else:
             self._save_vtk = None
+
+        if compute_output is not None:
+            self.simulation.command(f'compute compute_output {compute_output} pair/gran/local update_on_run_end yes id force_normal force_tangential contactArea delta')
+        else:
+            self.compute_output_bool = False
 
     def create_properties(self, sim_name):
         with open(sim_name) as f:
@@ -480,18 +492,41 @@ class LiggghtsSimulation(Simulation):
         ]
         return mesh_forc
 
-    def compute_normal_forces(self, compute_id):
+    def compute_output(self, id_output=False, normal_force_output=False, tangential_force_output=False, contact_area_output=False, overlap_output=False):
 
-        normal_forces_c_double = self.simulation.extract_compute(compute_id, 2, 2)
-        number_of_contacts = ctypes.sizeof(normal_forces_c_double)
+        compute_output = self.simulation.extract_compute('compute_output', 2, 2)
+        number_of_contacts = ctypes.sizeof(compute_output)
 
-        normal_forces = np.full((number_of_contacts, 3), np.nan)
-        for i in range(number_of_contacts):
-            normal_forces[i, 0] = normal_forces_c_double[i][0]
-            normal_forces[i, 1] = normal_forces_c_double[i][1]
-            normal_forces[i, 2] = normal_forces_c_double[i][2]
+        if id_output:
+            compute_extract_output = np.full((number_of_contacts, 1), np.nan)
+            for i in range(number_of_contacts):
+                compute_extract_output[i, 0] = compute_output[i][0]
 
-        return normal_forces
+        if normal_force_output:
+            compute_extract_output = np.full((number_of_contacts, 3), np.nan)
+            for i in range(number_of_contacts):
+                compute_extract_output[i, 0] = compute_output[i][1]
+                compute_extract_output[i, 1] = compute_output[i][2]
+                compute_extract_output[i, 2] = compute_output[i][3]
+
+        if tangential_force_output:
+            compute_extract_output = np.full((number_of_contacts, 3), np.nan)
+            for i in range(number_of_contacts):
+                compute_extract_output[i, 0] = compute_output[i][4]
+                compute_extract_output[i, 1] = compute_output[i][5]
+                compute_extract_output[i, 2] = compute_output[i][6]
+
+        if contact_area_output:
+            compute_extract_output = np.full((number_of_contacts, 1), np.nan)
+            for i in range(number_of_contacts):
+                compute_extract_output[i, 0] = compute_output[i][7]
+
+        if overlap_output:
+            compute_extract_output = np.full((number_of_contacts, 1), np.nan)
+            for i in range(number_of_contacts):
+                compute_extract_output[i, 0] = compute_output[i][8]
+
+        return compute_extract_output
 
     def set_position(
             self,
