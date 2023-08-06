@@ -253,6 +253,7 @@ class LiggghtsSimulation(Simulation):
 
         if compute_output is not None:
             self.simulation.command(f'compute compute_output {compute_output} pair/gran/local update_on_run_end yes id force_normal force_tangential contactArea delta')
+            self.compute_output_bool = True
         else:
             self.compute_output_bool = False
 
@@ -493,38 +494,48 @@ class LiggghtsSimulation(Simulation):
         return mesh_forc
 
     def compute_output(self, id_output=False, normal_force_output=False, tangential_force_output=False, contact_area_output=False, overlap_output=False):
+        if not self.compute_output_bool:
+            raise Exception("No compute output is defined. Please define compute output first by setting 'compute_output' in coexist.LiggghtsSimulation() "
+                            "to the string of particles group id that you wish to extract. Such as: coexist.LiggghtsSimulation(sim_path, verbose=True, compute_output='spheres')")
 
         compute_output = self.simulation.extract_compute('compute_output', 2, 2)
         number_of_contacts = ctypes.sizeof(compute_output)
 
+        all_contact_ids = []
+        i = 0
+        loop = True
+        while loop:
+            if compute_output[i][0] == 0:
+                loop = False
+            else:
+                all_contact_ids.append([compute_output[i][0], compute_output[i][1], compute_output[i][2]])
+                i += 1
         if id_output:
-            compute_extract_output = np.full((number_of_contacts, 1), np.nan)
-            for i in range(number_of_contacts):
-                compute_extract_output[i, 0] = compute_output[i][0]
+            compute_extract_output = all_contact_ids
 
         if normal_force_output:
-            compute_extract_output = np.full((number_of_contacts, 3), np.nan)
-            for i in range(number_of_contacts):
-                compute_extract_output[i, 0] = compute_output[i][1]
-                compute_extract_output[i, 1] = compute_output[i][2]
-                compute_extract_output[i, 2] = compute_output[i][3]
+            compute_extract_output = np.full((len(all_contact_ids), 3), np.nan)
+            for i in range(len(all_contact_ids)):
+                compute_extract_output[i, 0] = compute_output[i][3]
+                compute_extract_output[i, 1] = compute_output[i][4]
+                compute_extract_output[i, 2] = compute_output[i][5]
 
         if tangential_force_output:
-            compute_extract_output = np.full((number_of_contacts, 3), np.nan)
-            for i in range(number_of_contacts):
-                compute_extract_output[i, 0] = compute_output[i][4]
-                compute_extract_output[i, 1] = compute_output[i][5]
-                compute_extract_output[i, 2] = compute_output[i][6]
+            compute_extract_output = np.full((len(all_contact_ids), 3), np.nan)
+            for i in range(len(all_contact_ids)):
+                compute_extract_output[i, 0] = compute_output[i][6]
+                compute_extract_output[i, 1] = compute_output[i][7]
+                compute_extract_output[i, 2] = compute_output[i][8]
 
         if contact_area_output:
-            compute_extract_output = np.full((number_of_contacts, 1), np.nan)
-            for i in range(number_of_contacts):
-                compute_extract_output[i, 0] = compute_output[i][7]
+            compute_extract_output = np.full((len(all_contact_ids), 1), np.nan)
+            for i in range(len(all_contact_ids)):
+                compute_extract_output[i, 0] = compute_output[i][9]
 
         if overlap_output:
-            compute_extract_output = np.full((number_of_contacts, 1), np.nan)
-            for i in range(number_of_contacts):
-                compute_extract_output[i, 0] = compute_output[i][8]
+            compute_extract_output = np.full((len(all_contact_ids), 1), np.nan)
+            for i in range(len(all_contact_ids)):
+                compute_extract_output[i, 0] = compute_output[i][10]
 
         return compute_extract_output
 
