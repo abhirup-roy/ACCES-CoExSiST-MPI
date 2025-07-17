@@ -56,6 +56,7 @@ class LiggghtsSimulation(Simulation):
     NaNs.
     '''
 
+    simulation = None
     def __init__(
             self,
             sim_name,
